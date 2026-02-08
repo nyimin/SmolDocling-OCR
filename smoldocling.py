@@ -10,7 +10,8 @@ from transformers import AutoModelForVision2Seq, AutoProcessor
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
-# Try to import PyMuPDF
+print("Initializing SmolDocling... (This may take a moment)")
+from transformers import AutoModelForVision2Seq, AutoProcessorF
 try:
     import fitz
 except ImportError:
