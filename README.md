@@ -16,11 +16,29 @@ A powerful, optimized application that intelligently converts PDFs and images to
 - **Layout-Aware OCR**: **(NEW)** Intelligent column detection and XY-cut reading order for multi-column documents (academic papers, newspapers).
 - **Quality Validation**: **(NEW)** Built-in validation layer that assesses output quality, detects hallucinations, and provides transparency with 0.0-1.0 quality scores.
 - **Enhanced Metadata**: **(NEW)** Every extraction includes detailed metadata (page counts, detected columns, OCR confidence) and YAML frontmatter.
+- **🆕 v2.0 Quality Pipeline**: Advanced enhancement pipeline with noise reduction, caption extraction, footnote linking, and schema enforcement.
 - **Cloud-First OCR**: Priority support for OpenRouter's vision models with specialized RAG-optimized prompts.
 - **Myanmar 🇲🇲 Support**: High-accuracy OCR for Myanmar language via OpenRouter.
 - **Auto-Detection**: Intelligently switches between extraction methods based on file content.
 - **Smart Fallback**: Automatically falls back to local RapidOCR with layout analysis if cloud extraction fails.
 - **Modern UI**: Clean, responsive interface with real-time quality metrics and cost estimation.
+
+---
+
+### 🆕 v2.0 Quality Enhancement Modules
+
+DocFlow v2.0 introduces a comprehensive quality enhancement pipeline:
+
+| Module                    | Purpose                                                      |
+| ------------------------- | ------------------------------------------------------------ |
+| `semantic_annotator.py`   | Semantic role classification (headings, lists, captions)     |
+| `confidence_tracker.py`   | End-to-end OCR confidence tracking and aggregation           |
+| `schema_enforcer.py`      | RAG-optimized Markdown Schema v2.0 compliance                |
+| `language_detector.py`    | Auto-detects document language (100+ languages)              |
+| `noise_filter.py`         | Removes headers/footers, watermarks, page numbers, artifacts |
+| `caption_extractor.py`    | Extracts and links captions to tables/figures                |
+| `validation_framework.py` | Unified validation with hallucination detection              |
+| `enhanced_pipeline.py`    | Orchestrates all modules in a staged pipeline                |
 
 ---
 

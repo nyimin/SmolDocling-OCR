@@ -8,6 +8,15 @@ import openrouter_validator
 import rapidocr_validator
 import layout_analyzer # Metadata extraction and YAML frontmatter
 
+# Enhanced Pipeline Integration (v2.0)
+try:
+    from enhanced_pipeline import EnhancedPipeline, process_document_enhanced
+    ENHANCED_PIPELINE_AVAILABLE = True
+    print("Enhanced pipeline loaded successfully.")
+except ImportError as e:
+    print(f"Enhanced pipeline not available: {e}")
+    ENHANCED_PIPELINE_AVAILABLE = False
+
 # GMFT Imports
 try:
     from gmft.pdf_bindings import PyPDFium2Document
