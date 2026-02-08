@@ -27,8 +27,8 @@ except ImportError:
 def load_model(device):
     """Load the SmolDocling-256M model and processor."""
     model_id = "ds4sd/SmolDocling-256M-preview"
-    # Use bfloat16 if CUDA/MPS available for efficiency, else float32
-    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    # Use float32 for CPU
+    dtype = torch.float32
     
     print(f"Loading model: {model_id} on {device} ({dtype})...")
     
@@ -37,10 +37,10 @@ def load_model(device):
         model = AutoModelForVision2Seq.from_pretrained(
             model_id,
             torch_dtype=dtype,
-            _attn_implementation="flash_attention_2" if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8 else None,
         ).to(device)
     except Exception as e:
-        print(f"Warning: Failed to load with optimal settings. Falling back to CPU/Standard precision. Error: {e}")
+        print(f"Warning: Failed to load. Error: {e}")
+        # Fallback ensuring CPU/Standard precision if the above fails
         model = AutoModelForVision2Seq.from_pretrained(model_id).to("cpu")
         processor = AutoProcessor.from_pretrained(model_id)
         
@@ -64,7 +64,7 @@ def pdf_to_images(pdf_path):
     print(f"Extracted {len(images)} pages.")
     return images
 
-def process_document(input_path, output_path=None, device="cuda" if torch.cuda.is_available() else "cpu", progress_callback=None):
+def process_document(input_path, output_path=None, device="cpu", progress_callback=None):
     """Main processing function."""
     
     # 1. Load Images
@@ -129,10 +129,8 @@ def process_document(input_path, output_path=None, device="cuda" if torch.cuda.i
         all_doctags.append(generated_text)
         all_images.append(image)
         
-        # Explicitly free memory if using CUDA
+        # Explicitly free memory
         del inputs, generated_ids
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     # 4. Structure Document
     print("Structuring document...")
@@ -173,7 +171,7 @@ def main():
     parser = argparse.ArgumentParser(description="SmolDocling Converter (Lightweight Windows Version)")
     parser.add_argument("input", help="Input file (PDF or Image)")
     parser.add_argument("--output", "-o", help="Output file (Markdown)")
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use (cuda/cpu)")
+    parser.add_argument("--device", default="cpu", help="Device to use (cuda/cpu)")
     
     args = parser.parse_args()
     

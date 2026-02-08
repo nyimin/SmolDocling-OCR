@@ -1,8 +1,20 @@
-# Walkthrough: SmolDocling on Windows (Docker & CLI)
+# SmolDocling: Hybrid PDF & Image to Markdown Converter
 
-I have created a lightweight application to run the **SmolDocling-256M** model on Windows to convert PDFs and images to Markdown. You can run it either directly via Python or as a Docker container with a web UI.
+A lightweight, CPU-optimized application that intelligently converts PDFs and images to Markdown. It features a **Hybrid Pipeline** that automatically selects the best tool for the job:
 
-## Option 1: Docker (Recommended for UI)
+- **⚡ Fast Mode**: Uses `MarkItDown` (Microsoft) for instant text extraction from digital PDFs.
+- **🐢 Accurate Mode**: Uses `SmolDocling-256M` (HuggingFace) for high-quality OCR and layout analysis on scanned documents and images.
+
+## Features
+
+- **🚀 Smart Auto-Detection**: Automatically detects if a PDF is digital text or a scan and switches modes instantly.
+- **💻 CPU Optimized**: Designed to run efficiently on standard CPUs without requiring a GPU.
+- **🐳 Docker Ready**: dedicated container with a clean web UI (Gradio).
+- **📝 Markdown Output**: Clean, structured Markdown perfect for LLM context or documentation.
+
+---
+
+## Option 1: Docker (Recommended)
 
 Build and run the application in a container. This ensures all dependencies are isolated.
 
@@ -18,10 +30,10 @@ Build and run the application in a container. This ensures all dependencies are 
     docker run -p 7860:7860 smol-docling
     ```
 
-    _(If you have a GPU, add `--gpus all` to the run command for faster processing)_
-
 3.  **Open the UI**:
     Go to `http://localhost:7860` in your browser.
+
+    _You will see a "Conversion Mode" option. Leave it on **Auto** for best results, or manually select **Fast** (Text) or **Accurate** (OCR)._
 
 ---
 
@@ -38,15 +50,9 @@ pip install -r requirements.txt
 **Usage**:
 
 ```bash
-# Process a PDF
+# Start the Web UI
+python app.py
+
+# Run backend OCR directly (Legacy Mode)
 python smoldocling.py my_document.pdf -o output.md
-
-# Process an Image
-python smoldocling.py scanned_page.jpg -o output.md
 ```
-
-## Key Features
-
-- **Lightweight**: Uses `slim` python image and avoids full Docling suite.
-- **Scalable**: Handles 100+ page PDFs sequentially.
-- **Cross-Platform**: Docker works on Windows, Mac, and Linux.

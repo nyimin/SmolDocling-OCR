@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY smoldocling.py .
 COPY app.py .
+COPY fast_converter.py .
 
 # Create a non-root user for security (optional but good practice)
 RUN useradd -m appuser

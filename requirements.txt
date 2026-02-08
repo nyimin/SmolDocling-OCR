@@ -5,3 +5,4 @@ pillow
 docling-core
 pymupdf
 gradio
+markitdown
