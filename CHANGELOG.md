@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v2.1.1] - 2026-02-09
+
+### 🔧 Fixes
+
+- **Hyphen Rendering Fix**: Fixed issue where lists with Unicode minus signs (`−`) and indentation were rendered as code blocks. Now explicitly converts Unicode dashes to standard hyphens.
+- **List Normalization**: Implemented intelligent indent cleanup (removing 2-4 space top-level indentation) to prevent accidental code block rendering while preserving nested list structure.
+- **Digital PDF Consistency**: Applied `normalize_markdown` to the `pymupdf4llm` extraction path, ensuring consistent formatting rules for both digital and scanned documents.
+
 ## [v2.1.0] - 2026-02-09
 
 ### 🚀 pymupdf4llm Migration

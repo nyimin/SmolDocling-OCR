@@ -1,0 +1,36 @@
+Quality enhancement modules loaded successfully.
+Traceback (most recent call last):
+Enhanced pipeline loaded successfully.
+  File "D:\Triune\Stack Space - Documents\Code\DocFlow\test_detection.py", line 398, in <module>
+GMFT imported successfully.
+RapidOCR imported successfully.
+OpenAI library imported successfully (for OpenRouter).
+
+============================================================
+INDUSTRIAL-STANDARD DETECTION VALIDATION
+    sys.exit(main())
+============================================================
+
+Testing enhancements:
+  ò Pattern-based header/footer detection (15+ patterns)
+             ~~~~^^
+  ò Multi-signal heading classification (5 signals)
+  ò Position-based filtering (top/bottom 10%)
+  File "D:\Triune\Stack Space - Documents\Code\DocFlow\test_detection.py", line 369, in main
+  ò Image region detection (occupancy grid)
+  ò Backward compatibility
+
+============================================================
+TEST 1: Header/Footer Detection
+============================================================
+
+Pattern Detection:
+    'Header/Footer Detection': test_header_footer_detection(verbose),
+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "D:\Triune\Stack Space - Documents\Code\DocFlow\test_detection.py", line 146, in test_header_footer_detection
+    print(f"  Headers: {'\u2705 PASS' if header_found else '\u274c FAIL'}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nyimi\miniconda3\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 11: character maps to <undefined>

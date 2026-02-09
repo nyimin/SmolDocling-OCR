@@ -13,6 +13,7 @@ A powerful, optimized application that intelligently converts PDFs and images to
 ## ✨ Features
 
 - **RAG-Ready Output**: **(NEW)** Generates Markdown enriched with semantic annotations (headings, tables, lists, captions) and page markers for optimal chunking and retrieval.
+- **Smart Formatting**: **(FIX)** Automatically normalizes Unicode characters and fixes list indentation to ensure clean, valid Markdown output.
 - **Layout-Aware OCR**: **(NEW)** Intelligent column detection and XY-cut reading order for multi-column documents (academic papers, newspapers).
 - **Quality Validation**: **(NEW)** Built-in validation layer that assesses output quality, detects hallucinations, and provides transparency with 0.0-1.0 quality scores.
 - **Enhanced Metadata**: **(NEW)** Every extraction includes detailed metadata (page counts, detected columns, OCR confidence) and YAML frontmatter.

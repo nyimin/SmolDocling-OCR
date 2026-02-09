@@ -9,7 +9,7 @@ DocFlow is a multi-modal document extraction system designed to handle both digi
 1.  **Gradio UI (`app.py`)**: The entry point for users. Handles file uploads, setting configurations, and real-time feedback (cost estimation, quality scoring).
 2.  **Structure Engine (`structure_engine.py`)**: The orchestration layer. It manages different extraction engines, routes requests, and integrates validation layers.
 3.  **Layout Analyzer (`layout_analyzer.py`)**: Specialized module for document geometry. Handles column detection, XY-cut reading order, and semantic role classification.
-4.  **Normalization (`cleaner.py`)**: Deterministic post-processor that standardizes Markdown formatting (lists, spacing) and removes artifacts.
+4.  **Normalization (`cleaner.py`)**: Deterministic post-processor that standardizes Markdown formatting (lists, spacing, Unicode characters) and prevents code-block misinterpretation.
 5.  **Validation Layers**:
     - **OpenRouter Validator (`openrouter_validator.py`)**: Validates LLM output for hallucinations, semantic annotations, and reading order.
     - **RapidOCR Validator (`rapidocr_validator.py`)**: Assesses local OCR quality, layout accuracy, and completeness.
@@ -126,6 +126,5 @@ A dedicated validation layer assesses every document:
 - **PDF Processing**: [PyMuPDF](https://pymupdf.readthedocs.io/), [MarkItDown](https://github.com/microsoft/markitdown)
 - **Local OCR**: [RapidOCR](https://github.com/RapidAI/RapidOCR)
 - **Layout Analysis**: Custom XY-cut and Gap-based clustering in `layout_analyzer.py`
-- **Table Extraction**: [GMFT](https://github.com/microsoft/gmft)
 - **Cloud API**: [OpenRouter](https://openrouter.ai/)
 - **Language**: Python 3.10+

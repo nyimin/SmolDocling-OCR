@@ -1,0 +1,64 @@
+
+============================================================
+INDUSTRIAL-STANDARD DETECTION VALIDATION
+============================================================
+
+Testing enhancements:
+  - Pattern-based header/footer detection (15+ patterns)
+  - Multi-signal heading classification (5 signals)
+  - Position-based filtering (top/bottom 10%)
+  - Backward compatibility
+
+============================================================
+TEST 1: Header/Footer Detection
+============================================================
+
+Pattern Detection:
+  Headers: FAIL
+  Footers: FAIL
+
+Backward Compatibility:
+  Legacy function: FAIL
+
+============================================================
+TEST 2: Multi-Signal Heading Classification
+============================================================
+
+ALL CAPS + Large Font: PASS
+  Expected: heading (conf >= 0.6)
+  Got: heading (conf = 0.69)
+
+Title Case + Whitespace: PASS
+  Expected: heading (conf >= 0.4)
+  Got: heading (conf = 0.52)
+
+Regular Paragraph: PASS
+  Expected: paragraph (conf >= 0.0)
+  Got: paragraph (conf = 0.89)
+
+Caption (Figure keyword): PASS
+  Expected: caption (conf >= 0.8)
+  Got: caption (conf = 0.85)
+
+Overall: PASS (4/4 tests passed)
+
+============================================================
+TEST 3: End-to-End Integration
+============================================================
+
+Semantic Roles Found: {'paragraph'}
+Expected Roles Present: FAIL
+Confidence Scores: PASS
+
+============================================================
+TEST SUMMARY
+============================================================
+Header/Footer Detection: FAIL
+Heading Classification: PASS
+End-to-End Integration: FAIL
+
+============================================================
+WARNING: SOME TESTS FAILED
+Review the output above for details.
+============================================================
+

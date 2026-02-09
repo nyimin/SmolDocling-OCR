@@ -251,14 +251,9 @@ def process_single_file(file_path, dpi, ocr_lang, page_start, page_end, use_cach
     markdown_text = None
     method_used = None
     
-    if progress_callback:
-        progress_callback(0.3, desc=f"🔍 Extracting {Path(file_path).name}...")
-    
     # Route based on OCR engine selection
     if "OpenRouter" in ocr_engine:
         # Use OpenRouter for OCR
-        if progress_callback:
-            progress_callback(0.4, desc=f"🌐 Extracting with OpenRouter...")
         
         # Map UI model names to tier keys
         model_map = {
@@ -289,15 +284,10 @@ def process_single_file(file_path, dpi, ocr_lang, page_start, page_end, use_cach
         except Exception as e:
             # Fallback to RapidOCR if OpenRouter fails (timeout, connection error, etc.)
             print(f"OpenRouter extraction failed: {type(e).__name__} - {e}")
-            if progress_callback:
-                progress_callback(0.5, desc="⚠️ OpenRouter failed, falling back to RapidOCR...")
             markdown_text, _ = structure_engine.extract_with_rapidocr(file_path, dpi=dpi, lang=ocr_lang)
             method_used = "RapidOCR (Fallback)"
     else:
         # SMART LOCAL MODE (Digital -> RapidOCR)
-        if progress_callback:
-            progress_callback(0.4, desc=f"🧠 Smart extraction {Path(file_path).name}...")
-        
         # Use new smart local function
         markdown_text, metadata = structure_engine.extract_smart_local(
             file_path, dpi=dpi, lang=ocr_lang, progress_callback=progress_callback
@@ -341,7 +331,6 @@ def process_upload(files, export_format, dpi, ocr_lang, page_start, page_end, us
         
         for idx, file in enumerate(files):
             input_path = file.name if hasattr(file, 'name') else file
-            progress(idx / len(files), desc=f"📄 Processing {idx+1}/{len(files)}...")
             
             markdown_text, method_used = process_single_file(
                 input_path, dpi, ocr_lang, page_start, page_end, use_cache,
@@ -358,8 +347,6 @@ def process_upload(files, export_format, dpi, ocr_lang, page_start, page_end, us
         
         if not results:
             return None, None, None, "❌ Failed to extract content.", "", gr.update(visible=False), metadata_info, extracted_images, quality_info
-        
-        progress(0.9, desc="✨ Finalizing...")
         
         elapsed_time = time.time() - start_time
         total_words = sum(count_stats(r['markdown'])[0] for r in results)
@@ -783,33 +770,7 @@ with gr.Blocks(title="DocFlow") as demo:
                 process_btn = gr.Button("Convert to Markdown", variant="primary", size="lg", elem_classes="primary-btn")
                 clear_btn = gr.Button("Clear", variant="secondary", size="lg")
             
-
-            
-            # Status Card (PERSISTENT - ALWAYS VISIBLE)
-            gr.Markdown("## Status")
-            with gr.Column(elem_id="status-card"):
-                with gr.Row():
-                    status_box = gr.Markdown("**Status:** Upload a file to get started")
-                    quality_display = gr.Markdown("**Quality:** N/A")
-                
-                with gr.Row():
-                    stats_display = gr.Markdown("**Stats:** N/A")
-                    metadata_display = gr.Markdown("**Metadata:** N/A")
-            
-            # Results Section
-            gr.Markdown("## Results")
-            with gr.Tabs():
-                with gr.TabItem("Preview"):
-                    output_md_view = gr.Markdown(elem_classes="output-markdown")
-                with gr.TabItem("Raw Code"):
-                    output_raw_text = gr.TextArea(label="Markdown Source", lines=18)
-                    copy_btn = gr.Button("Copy to Clipboard", elem_classes="copy-btn", size="sm")
-                with gr.TabItem("Extracted Images"):
-                    image_gallery = gr.Gallery(label="Images from PDF", columns=3, height=400, value=[])
-
-            download_btn = gr.File(label="Download", interactive=False)
-            
-            # Settings Footer
+            # Settings Section
             gr.Markdown("## Settings")
             with gr.Group(elem_classes="quick-settings"):
                 with gr.Row():
@@ -880,6 +841,34 @@ with gr.Blocks(title="DocFlow") as demo:
                     gr.Markdown("### Appearance")
                     with gr.Row():
                         theme_btn = gr.Button("Toggle Dark/Light Mode", elem_classes="theme-btn")
+
+            
+            # Status Card (PERSISTENT - ALWAYS VISIBLE)
+            gr.Markdown("## Status")
+            with gr.Column(elem_id="status-card"):
+                with gr.Row():
+                    stats_display = gr.Markdown("**Stats:** N/A")
+                    quality_display = gr.Markdown("**Quality:** N/A")
+                
+                with gr.Row():
+                    metadata_display = gr.Markdown("**Metadata:** N/A")
+            
+            # Results Section
+            gr.Markdown("## Results")
+            
+            # Status display in Results section
+            status_box = gr.Markdown("**Status:** Upload a file to get started")
+            
+            with gr.Tabs():
+                with gr.TabItem("Preview"):
+                    output_md_view = gr.Markdown(elem_classes="output-markdown")
+                with gr.TabItem("Raw Code"):
+                    output_raw_text = gr.TextArea(label="Markdown Source", lines=18)
+                    copy_btn = gr.Button("Copy to Clipboard", elem_classes="copy-btn", size="sm")
+                with gr.TabItem("Extracted Images"):
+                    image_gallery = gr.Gallery(label="Images from PDF", columns=3, height=400, value=[])
+
+            download_btn = gr.File(label="Download", interactive=False)
 
     # Events
     # Settings toggle

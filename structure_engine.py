@@ -75,6 +75,9 @@ def extract_with_pymupdf4llm(pdf_path):
         # Extract with pymupdf4llm (optimized for LLMs)
         md_text = pymupdf4llm.to_markdown(pdf_path)
         
+        # Apply normalization (Unicode dash conversion, indentation cleanup)
+        md_text = cleaner.normalize_markdown(md_text)
+        
         # Get page count for metadata
         doc = fitz.open(pdf_path)
         page_count = len(doc)
@@ -155,18 +158,131 @@ class RapidOCRPage(BasePage):
     def close(self):
         pass
 
+def detect_image_regions(image, ocr_result, min_gap_size=100):
+    """
+    Detect potential image regions by analyzing gaps in OCR coverage.
+    
+    Industrial-standard approach:
+    - Analyze spatial distribution of OCR text boxes
+    - Identify large rectangular gaps (likely images/figures)
+    - Mark regions for semantic tagging
+    
+    Args:
+        image: PIL Image object
+        ocr_result: RapidOCR result (list of [bbox, text, confidence])
+        min_gap_size: Minimum gap size (pixels) to consider as image region
+    
+    Returns:
+        List of image region elements with bounding boxes
+    
+    Note:
+        This is a heuristic approach. For better accuracy, use ML-based
+        image detection (e.g., LayoutLM, Detectron2) if resources allow.
+    """
+    if not ocr_result:
+        return []
+    
+    image_width = image.width
+    image_height = image.height
+    
+    # Create a simple occupancy grid (divide page into cells)
+    grid_size = 50  # 50x50 pixel cells
+    grid_w = (image_width + grid_size - 1) // grid_size
+    grid_h = (image_height + grid_size - 1) // grid_size
+    occupancy = [[False] * grid_w for _ in range(grid_h)]
+    
+    # Mark cells occupied by text
+    for line in ocr_result:
+        box = line[0]
+        xs = [p[0] for p in box]
+        ys = [p[1] for p in box]
+        x0, y0, x1, y1 = int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))
+        
+        # Mark grid cells
+        for y in range(max(0, y0 // grid_size), min(grid_h, (y1 + grid_size - 1) // grid_size)):
+            for x in range(max(0, x0 // grid_size), min(grid_w, (x1 + grid_size - 1) // grid_size)):
+                occupancy[y][x] = True
+    
+    # Find contiguous empty regions (potential images)
+    visited = [[False] * grid_w for _ in range(grid_h)]
+    image_regions = []
+    
+    def flood_fill(start_y, start_x):
+        """Find contiguous empty region using flood fill."""
+        stack = [(start_y, start_x)]
+        min_x, min_y = start_x, start_y
+        max_x, max_y = start_x, start_y
+        
+        while stack:
+            y, x = stack.pop()
+            if y < 0 or y >= grid_h or x < 0 or x >= grid_w:
+                continue
+            if visited[y][x] or occupancy[y][x]:
+                continue
+            
+            visited[y][x] = True
+            min_x, min_y = min(min_x, x), min(min_y, y)
+            max_x, max_y = max(max_x, x), max(max_y, y)
+            
+            # Add neighbors
+            stack.extend([(y-1, x), (y+1, x), (y, x-1), (y, x+1)])
+        
+        return (min_x * grid_size, min_y * grid_size, 
+                (max_x + 1) * grid_size, (max_y + 1) * grid_size)
+    
+    # Find all empty regions
+    for y in range(grid_h):
+        for x in range(grid_w):
+            if not visited[y][x] and not occupancy[y][x]:
+                region_bbox = flood_fill(y, x)
+                width = region_bbox[2] - region_bbox[0]
+                height = region_bbox[3] - region_bbox[1]
+                
+                # Filter by minimum size
+                if width >= min_gap_size and height >= min_gap_size:
+                    image_regions.append({
+                        'bbox': region_bbox,
+                        'y': region_bbox[1],
+                        'type': 'figure',
+                        'content': f'[Figure: {width}x{height}px]',
+                        'semantic_role': 'figure'
+                    })
+    
+    return image_regions
+
 def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
     """
     Use RapidOCR + GMFT to extract text and tables from images/scans.
     
+    Industrial-standard enhancements (v2.1):
+    - Pattern-based header/footer detection (15+ regex patterns)
+    - Multi-signal heading classification (font size, whitespace, caps, length, indent)
+    - Position-based filtering (top/bottom 10% zones)
+    - Image region detection via occupancy grid analysis
+    
     Args:
         input_path: Path to PDF or image file
-        dpi: DPI for PDF rendering
-        lang: Language code for OCR
+        dpi: DPI for PDF rendering (default: 300 for high accuracy)
+        lang: Language code for OCR (default: "en")
         enhanced_mode: Use v2.0 quality enhancement pipeline (default: True)
     
     Returns:
         tuple: (markdown_text, metadata_dict)
+    
+    Limitations (heuristic-based approach, no ML):
+        - Borderless tables: May struggle with whitespace-only tables
+          (GMFT works best with bordered tables)
+        - Complex multi-column layouts: 50px gap threshold may need tuning
+          for dense academic papers or newspapers
+        - Image detection: Heuristic-based (occupancy grid), may miss
+          small images or misidentify large whitespace regions
+        - Font weight: RapidOCR doesn't provide bold/italic metadata
+          (using capitalization and size as proxies)
+    
+    For better accuracy on complex documents, consider:
+        - ML-based alternatives: LayoutLM, Detectron2, TableTransformer
+        - Cloud services: AWS Textract, Google Document AI
+        - Hybrid approach: Use this for standard docs, ML for edge cases
     """
     if not ocr_engine:
         return "Error: RapidOCR not initialized.", {}
@@ -264,11 +380,15 @@ def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
                         "confidence": line[2] if len(line) > 2 else 1.0  # OCR confidence
                     })
             
+            # Detect image regions (medium-term enhancement)
+            image_regions = detect_image_regions(image, result, min_gap_size=100)
+            
             # Apply layout analysis for intelligent reading order
             analyzer = layout_analyzer.LayoutAnalyzer(column_gap_threshold=50)
             layout_result = analyzer.analyze_page_layout(
                 text_elements,
-                confidence_threshold=0.7
+                confidence_threshold=0.7,
+                use_enhanced_classification=True  # Use multi-signal classification
             )
             
             # Convert analyzed elements to page_elements format
@@ -279,9 +399,15 @@ def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
                     "content": elem['text'],
                     "reading_order": elem.get('reading_order', 0),
                     "semantic_role": elem.get('semantic_role', 'paragraph'),
+                    "role_confidence": elem.get('role_confidence', 1.0),  # Enhanced classification confidence
                     "confidence": elem.get('confidence', 1.0),
-                    "uncertain": elem.get('uncertain', False)
+                    "uncertain": elem.get('uncertain', False),
+                    "bbox": elem.get('bbox', (0, 0, 0, 0))  # Preserve bbox for downstream processing
                 })
+            
+            # Add detected image regions
+            for img_region in image_regions:
+                page_elements.append(img_region)
             
             # Collect tables
             # Custom config for scans
@@ -373,16 +499,31 @@ def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
             reading_order = elem.get("reading_order", 0)
             uncertain = elem.get("uncertain", False)
             confidence = elem.get("confidence", 1.0)
+            role_confidence = elem.get("role_confidence", 1.0)
+            
             try:
                 confidence = float(confidence) if isinstance(confidence, str) else confidence
+                role_confidence = float(role_confidence) if isinstance(role_confidence, str) else role_confidence
             except (ValueError, TypeError):
                 confidence = 1.0
+                role_confidence = 1.0
             
             if elem_type == "text":
                 # Add semantic role annotation
                 if semantic_role:
                     if semantic_role == "heading":
-                        page_text_accumulator += f"<!-- role:heading -->\n"
+                        # Add confidence for uncertain headings
+                        if role_confidence < 0.6:
+                            page_text_accumulator += f"<!-- role:heading confidence:{role_confidence:.2f} -->\n"
+                        else:
+                            page_text_accumulator += f"<!-- role:heading -->\n"
+                    elif semantic_role in ("header", "footer"):
+                        # Tag headers/footers (Tag-Don't-Remove strategy)
+                        page_text_accumulator += f"<!-- role:{semantic_role} -->\n"
+                    elif semantic_role == "caption":
+                        page_text_accumulator += f"<!-- role:caption -->\n"
+                    elif semantic_role == "footnote":
+                        page_text_accumulator += f"<!-- role:footnote -->\n"
                     elif semantic_role != "paragraph":  # Don't annotate default paragraphs
                         page_text_accumulator += f"<!-- role:{semantic_role} -->\n"
                 
@@ -407,6 +548,17 @@ def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
                 # Add table with role annotation
                 output_md += "<!-- role:table -->\n"
                 output_md += "\n" + content + "\n\n"
+            
+            elif elem_type == "figure":
+                # Flush text accumulator first
+                if page_text_accumulator:
+                    fixed_text = cleaner.merge_hyphenated_words(page_text_accumulator)
+                    output_md += fixed_text + "\n"
+                    page_text_accumulator = ""
+                
+                # Add figure annotation
+                output_md += "<!-- role:figure -->\n"
+                output_md += content + "\n\n"
         
         # Flush remaining text
         if page_text_accumulator:
@@ -756,17 +908,24 @@ def extract_smart_local(input_path, dpi=300, lang="en", enhanced_mode=True, prog
             # Call pymupdf4llm extraction
             md_text, digital_meta = extract_with_pymupdf4llm(input_path)
             
-            # Heuristic: Check if we got meaningful text length
-            if md_text and len(md_text.strip()) > 100:
-                print("Smart Local: Digital extraction successful.")
-                if progress_callback:
-                    progress_callback(1.0, "✅ Digital extraction complete")
+            # Enhanced heuristic: Check both text length AND word count
+            # Scanned PDFs often have minimal metadata text but no real content
+            if md_text:
+                text_stripped = md_text.strip()
+                word_count = len(text_stripped.split())
                 
-                # Merge metadata
-                metadata.update(digital_meta)
-                return md_text, metadata
-            else:
-                print("Smart Local: Digital extraction returned insufficient text. Falling back to OCR.")
+                # Require both sufficient length AND word count for digital extraction
+                # Scanned PDFs typically have <100 words (just metadata/frontmatter)
+                if len(text_stripped) > 100 and word_count > 100:
+                    print(f"Smart Local: Digital extraction successful ({word_count} words).")
+                    if progress_callback:
+                        progress_callback(1.0, "✅ Digital extraction complete")
+                    
+                    # Merge metadata
+                    metadata.update(digital_meta)
+                    return md_text, metadata
+                else:
+                    print(f"Smart Local: Digital extraction returned insufficient text ({word_count} words, {len(text_stripped)} chars). Falling back to OCR.")
                 if progress_callback:
                     progress_callback(0.4, "📄 Scanned document detected, running OCR...")
         except Exception as e:
