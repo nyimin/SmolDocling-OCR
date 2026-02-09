@@ -4,132 +4,42 @@ import tempfile
 import os
 import traceback
 import time
-import json
 import zipfile
-import hashlib
-import base64
 from pathlib import Path
 from datetime import datetime
 from PIL import Image
 import io
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 import pymupdf4llm
 import fitz  # PyMuPDF for metadata and preview
 import structure_engine
-import markdown2
-from docx import Document
+
+# Import service modules
+from services.cache_manager import (
+    get_file_hash, get_cached_result, save_to_cache, 
+    clear_cache, get_cache_size
+)
+from services.history_manager import (
+    load_history, save_history, get_history_display, clear_history
+)
+from utils.formatters import (
+    count_stats, estimate_quality_score, estimate_cost,
+    markdown_to_html, markdown_to_txt, markdown_to_docx,
+    load_stats, save_stats, update_stats, get_stats_display
+)
 
 # Constants
 MIN_TEXT_THRESHOLD = 50
-HISTORY_FILE = "conversion_history.json"
-CACHE_DIR = "cache"
 IMAGES_DIR = "extracted_images"
-STATS_FILE = "usage_stats.json"
-MAX_HISTORY = 10
 
 # Create directories
-os.makedirs(CACHE_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
-def load_history():
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_history(entry):
-    history = load_history()
-    history.insert(0, entry)
-    history = history[:MAX_HISTORY]
-    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(history, f, indent=2)
-
-def load_stats():
-    if os.path.exists(STATS_FILE):
-        try:
-            with open(STATS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            pass
-    return {"total_conversions": 0, "total_words": 0, "total_files": 0, "avg_time": 0}
-
-def save_stats(stats):
-    with open(STATS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(stats, f, indent=2)
-
-def update_stats(words, elapsed_time):
-    stats = load_stats()
-    stats["total_conversions"] += 1
-    stats["total_words"] += words
-    stats["total_files"] += 1
-    n = stats["total_conversions"]
-    stats["avg_time"] = ((stats["avg_time"] * (n-1)) + elapsed_time) / n
-    save_stats(stats)
-    return stats
-
-def get_file_hash(file_path):
-    hasher = hashlib.md5()
-    with open(file_path, 'rb') as f:
-        buf = f.read(65536)
-        while buf:
-            hasher.update(buf)
-            buf = f.read(65536)
-    return hasher.hexdigest()
-
-def get_cached_result(file_hash, dpi, export_format):
-    cache_key = f"{file_hash}_{dpi}_{export_format}"
-    cache_path = os.path.join(CACHE_DIR, f"{cache_key}.json")
-    if os.path.exists(cache_path):
-        try:
-            with open(cache_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            pass
-    return None
-
-def save_to_cache(file_hash, dpi, export_format, markdown_text, method_used):
-    cache_key = f"{file_hash}_{dpi}_{export_format}"
-    cache_path = os.path.join(CACHE_DIR, f"{cache_key}.json")
-    with open(cache_path, 'w', encoding='utf-8') as f:
-        json.dump({
-            "markdown": markdown_text,
-            "method": method_used,
-            "cached_at": datetime.now().isoformat()
-        }, f)
-
-def count_stats(text):
-    if not text:
-        return 0, 0
-    words = len(text.split())
-    chars = len(text)
-    return words, chars
-
-def estimate_quality_score(markdown_text, method_used):
-    """Estimate conversion quality (0-100)."""
-    score = 50  # Base score
-    
-    # Method bonus
-    if "Primary" in method_used:
-        score += 30
-    elif "cached" in method_used:
-        score += 20
-    
-    # Content analysis
-    if markdown_text:
-        # Has tables
-        if "|" in markdown_text and "---" in markdown_text:
-            score += 10
-        # Has headers
-        if "#" in markdown_text:
-            score += 5
-        # Has formatting
-        if "**" in markdown_text or "*" in markdown_text:
-            score += 5
-    
-    return min(100, score)
+# All cache, history, and stats functions now imported from modules
 
 def get_pdf_metadata(file_path):
     try:
@@ -153,8 +63,9 @@ def get_pdf_metadata(file_path):
                 try:
                     formatted = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
                     info.append(f"**Created:** {formatted}")
-                except:
-                    pass
+                except (IndexError, ValueError) as e:
+                    # Date string format is invalid - skip this field
+                    print(f"Warning: Could not parse creation date '{date_str}': {e}")
         
         return "\n".join(info) if info else "No metadata available"
     except Exception as e:
@@ -214,13 +125,38 @@ def markdown_to_html(markdown_text):
 <head>
     <meta charset="UTF-8">
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
-                max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; }}
+        :root {{
+            --bg-color: #ffffff;
+            --text-color: #111827;
+            --border-color: #e5e7eb;
+            --code-bg: #f3f4f6;
+            --header-bg: #f9fafb;
+        }}
+        @media (prefers-color-scheme: dark) {{
+            :root {{
+                --bg-color: #0d1117;
+                --text-color: #c9d1d9;
+                --border-color: #30363d;
+                --code-bg: #161b22;
+                --header-bg: #161b22;
+            }}
+        }}
+        body {{ 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif; 
+            max-width: 800px; 
+            margin: 40px auto; 
+            padding: 20px; 
+            line-height: 1.6;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }}
         table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-        th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
-        th {{ background-color: #f5f5f5; }}
-        code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }}
-        pre {{ background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }}
+        th, td {{ border: 1px solid var(--border-color); padding: 12px; text-align: left; }}
+        th {{ background-color: var(--header-bg); font-weight: 600; }}
+        code {{ background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }}
+        pre {{ background: var(--code-bg); padding: 15px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--border-color); }}
+        img {{ max-width: 100%; height: auto; border-radius: 4px; }}
+        blockquote {{ border-left: 4px solid var(--border-color); margin: 0; padding-left: 16px; color: var(--text-color); opacity: 0.8; }}
     </style>
 </head>
 <body>
@@ -270,27 +206,44 @@ def estimate_cost(model_name, pages=1):
     """Estimate cost for processing given number of pages."""
     cost_per_1m = get_openrouter_cost(model_name)
     if cost_per_1m == 0.0:
-        return "💰 **Estimated Cost:** FREE ⭐"
+        return "**Estimated Cost:** FREE"
     
     # Estimate ~1000 tokens per page (conservative)
     tokens_estimate = pages * 1000
     cost_estimate = (tokens_estimate / 1_000_000) * cost_per_1m
     
     if cost_estimate < 0.01:
-        return f"💰 **Estimated Cost:** ~${cost_estimate:.4f} ({pages} page{'s' if pages > 1 else ''})"
+        return f"**Estimated Cost:** ~${cost_estimate:.4f} ({pages} page{'s' if pages > 1 else ''})"
     else:
-        return f"💰 **Estimated Cost:** ~${cost_estimate:.2f} ({pages} page{'s' if pages > 1 else ''})"
+        return f"**Estimated Cost:** ~${cost_estimate:.2f} ({pages} page{'s' if pages > 1 else ''})"
 
 def toggle_settings(engine_choice):
-    """Toggle visibility of OpenRouter vs RapidOCR settings."""
-    is_openrouter = "OpenRouter" in engine_choice
-    return gr.update(visible=is_openrouter), gr.update(visible=not is_openrouter)
+    """Toggle visibility of OpenRouter vs Local OCR settings."""
+    is_cloud = "Cloud OCR" in engine_choice
+    return gr.update(visible=is_cloud), gr.update(visible=not is_cloud)
+
+def clear_all():
+    """Clear all inputs and reset UI to initial state."""
+    return (
+        None,  # file_input
+        "",    # output_md_view
+        "",    # output_raw_text
+        None,  # download_btn
+        "**Status:** Upload a file to get started",  # status_box
+        "**Stats:** N/A",  # stats_display
+        "**Quality:** N/A",  # quality_display
+        "**Metadata:** N/A",  # metadata_display
+        []     # image_gallery
+    )
+
 
 def process_single_file(file_path, dpi, ocr_lang, page_start, page_end, use_cache, ocr_engine="RapidOCR", openrouter_model="free", openrouter_api_key=None, progress_callback=None):
     # Check cache
     if use_cache and file_path.lower().endswith(".pdf"):
         file_hash = get_file_hash(file_path)
-        cache_key = f"{ocr_engine}_{openrouter_model if 'OpenRouter' in ocr_engine else dpi}"
+        cache_key_raw = f"{ocr_engine}_{openrouter_model if 'OpenRouter' in ocr_engine else dpi}"
+        import re
+        cache_key = re.sub(r'[\\/*?:"<>|]', '_', cache_key_raw)
         cached = get_cached_result(file_hash, cache_key, "md")
         if cached:
             return cached["markdown"], cached["method"] + " (cached)"
@@ -317,56 +270,43 @@ def process_single_file(file_path, dpi, ocr_lang, page_start, page_end, use_cach
         }
         model_tier = model_map.get(openrouter_model, "free")
         
-        markdown_text, metadata = structure_engine.extract_with_openrouter(
-            file_path, model=model_tier, api_key=openrouter_api_key
-        )
-        method_used = f"OpenRouter ({metadata.get('model_used', 'Unknown')})"
-        
-        # Check for errors
-        if "Error" in markdown_text:
-            # Fallback to RapidOCR if OpenRouter fails
+        # DEBUG: Check API Key
+        if openrouter_api_key:
+            print(f"DEBUG: calling OpenRouter with key: {openrouter_api_key[:8]}...")
+        else:
+            print("DEBUG: calling OpenRouter with NO API KEY (should fallback to env var)")
+
+        try:
+            markdown_text, metadata = structure_engine.extract_with_openrouter(
+                file_path, model=model_tier, api_key=openrouter_api_key
+            )
+            method_used = f"OpenRouter ({metadata.get('model_used', 'Unknown')})"
+            
+            # Check for errors in returned text
+            if markdown_text and "Error" in markdown_text:
+                raise Exception("OpenRouter returned error text")
+                
+        except Exception as e:
+            # Fallback to RapidOCR if OpenRouter fails (timeout, connection error, etc.)
+            print(f"OpenRouter extraction failed: {type(e).__name__} - {e}")
             if progress_callback:
                 progress_callback(0.5, desc="⚠️ OpenRouter failed, falling back to RapidOCR...")
-            markdown_text = structure_engine.extract_with_rapidocr(file_path, dpi=dpi, lang=ocr_lang)
+            markdown_text, _ = structure_engine.extract_with_rapidocr(file_path, dpi=dpi, lang=ocr_lang)
             method_used = "RapidOCR (Fallback)"
     else:
-        # Use local processing (pymupdf4llm + RapidOCR fallback)
-        # PRIMARY MODE: pymupdf4llm
-        if file_path.lower().endswith(".pdf"):
-            try:
-                pages = None
-                if page_start is not None or page_end is not None:
-                    doc = fitz.open(file_path)
-                    total_pages = len(doc)
-                    doc.close()
-                    start = (page_start or 1) - 1
-                    end = min(page_end or total_pages, total_pages)
-                    pages = list(range(start, end))
-                
-                markdown_text = pymupdf4llm.to_markdown(
-                    file_path,
-                    page_chunks=False,
-                    write_images=False,
-                    dpi=dpi,
-                    force_text=True,
-                    pages=pages,
-                )
-                
-                if markdown_text and len(markdown_text.strip()) > MIN_TEXT_THRESHOLD:
-                    method_used = "Primary (pymupdf4llm)"
-                else:
-                    markdown_text = None
-                    
-            except Exception as e:
-                print(f"Primary extraction failed: {e}")
-                markdown_text = None
+        # SMART LOCAL MODE (Digital -> RapidOCR)
+        if progress_callback:
+            progress_callback(0.4, desc=f"🧠 Smart extraction {Path(file_path).name}...")
         
-        # FALLBACK MODE: RapidOCR
-        if markdown_text is None:
-            if progress_callback:
-                progress_callback(0.5, desc=f"🔬 OCR scanning {Path(file_path).name}...")
-            markdown_text = structure_engine.extract_with_rapidocr(file_path, dpi=dpi, lang=ocr_lang)
-            method_used = "Fallback (RapidOCR)"
+        # Use new smart local function
+        markdown_text, metadata = structure_engine.extract_smart_local(
+            file_path, dpi=dpi, lang=ocr_lang, progress_callback=progress_callback
+        )
+        method_used = metadata.get("extraction_method", "Smart Local")
+        
+        # If extraction failed completely
+        if not markdown_text:
+             method_used = "Failed"
     
     # Cache result
     if use_cache and markdown_text and file_path.lower().endswith(".pdf"):
@@ -379,7 +319,7 @@ def process_single_file(file_path, dpi, ocr_lang, page_start, page_end, use_cach
 
 def process_upload(files, export_format, dpi, ocr_lang, page_start, page_end, use_cache, ocr_engine, openrouter_model, openrouter_api_key, progress=gr.Progress()):
     if not files:
-        return None, None, None, "Upload a PDF or image to get started.", "", gr.update(visible=False), "", None, [], ""
+        return None, None, None, "Upload a PDF or image to get started.", "", gr.update(visible=False), "", [], ""
     
     if not isinstance(files, list):
         files = [files]
@@ -406,7 +346,7 @@ def process_upload(files, export_format, dpi, ocr_lang, page_start, page_end, us
             markdown_text, method_used = process_single_file(
                 input_path, dpi, ocr_lang, page_start, page_end, use_cache,
                 ocr_engine, openrouter_model, openrouter_api_key,
-                lambda p, desc: progress((idx + p) / len(files), desc=desc)
+                progress_callback=progress  # Pass progress directly, no nested lambda
             )
             
             if markdown_text:
@@ -417,7 +357,7 @@ def process_upload(files, export_format, dpi, ocr_lang, page_start, page_end, us
                 })
         
         if not results:
-            return None, None, None, "❌ Failed to extract content.", "", gr.update(visible=False), metadata_info, preview_image, extracted_images, quality_info
+            return None, None, None, "❌ Failed to extract content.", "", gr.update(visible=False), metadata_info, extracted_images, quality_info
         
         progress(0.9, desc="✨ Finalizing...")
         
@@ -465,7 +405,7 @@ def process_upload(files, export_format, dpi, ocr_lang, page_start, page_end, us
                 'method': method_used
             })
             
-            return markdown_text, markdown_text, output_path, status, stats_text, gr.update(visible=True), metadata_info, preview_image, extracted_images, quality_info
+            return markdown_text, markdown_text, output_path, status, stats_text, gr.update(visible=True), metadata_info, extracted_images, quality_info
         
         else:
             # Batch processing
@@ -499,11 +439,11 @@ def process_upload(files, export_format, dpi, ocr_lang, page_start, page_end, us
             stats_text = f"📊 **{len(results)} files** • **{total_words:,}** words"
             status = f"✅ Batch converted {len(results)} files in **{elapsed_time:.1f}s**"
             
-            return first_md, first_md, zip_path, status, stats_text, gr.update(visible=True), metadata_info, preview_image, extracted_images, quality_info
+            return first_md, first_md, zip_path, status, stats_text, gr.update(visible=True), metadata_info, extracted_images, quality_info
         
     except Exception as e:
         traceback.print_exc()
-        return None, None, None, f"❌ Error: {str(e)}", "", gr.update(visible=False), metadata_info, preview_image, extracted_images, quality_info
+        return None, None, None, f"Error: {str(e)}", "", gr.update(visible=False), metadata_info, extracted_images, quality_info
 
 def get_history_display():
     history = load_history()
@@ -531,57 +471,272 @@ def clear_cache():
         os.makedirs(CACHE_DIR, exist_ok=True)
     return "✅ Cache cleared!"
 
-# CSS
+# CSS - Minimalist Design System
 custom_css = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
-* { font-family: 'Inter', sans-serif !important; }
-.container { max-width: 1200px !important; margin: auto; padding-top: 2rem; }
-#header { text-align: center; margin-bottom: 1.5rem; }
+/* ========================================
+   DESIGN SYSTEM: PRIMITIVES
+   ======================================== */
+
+:root {
+  /* Neutral Scale (Slate-ish Gray for modern feel) */
+  --neutral-0:    #ffffff;
+  --neutral-50:   #f8fafc;
+  --neutral-100:  #f1f5f9;
+  --neutral-200:  #e2e8f0;
+  --neutral-300:  #cbd5e1;
+  --neutral-400:  #94a3b8;
+  --neutral-500:  #64748b;
+  --neutral-600:  #475569;
+  --neutral-700:  #334155;
+  --neutral-800:  #1e293b;
+  --neutral-900:  #0f172a;
+  --neutral-950:  #020617;
+
+  /* Brand Scale (Indigo - deeply professional) */
+  --brand-50:     #eef2ff;
+  --brand-100:    #e0e7ff;
+  --brand-200:    #c7d2fe;
+  --brand-300:    #a5b4fc;
+  --brand-400:    #818cf8;
+  --brand-500:    #6366f1;
+  --brand-600:    #4f46e5;
+  --brand-700:    #4338ca;
+  --brand-800:    #3730a3;
+  --brand-900:    #312e81;
+  --brand-950:    #1e1b4b;
+
+  /* Status Colors (Semantic) */
+  --error-light:  #ef4444;
+  --error-dark:   #f87171;
+  --success-light:#10b981;
+  --success-dark: #34d399;
+
+  /* ========================================
+     SEMANTIC TOKENS (Light Mode Default)
+     ======================================== */
+  
+  /* Backgrounds */
+  --bg-app:          var(--neutral-50);
+  --bg-panel:        var(--neutral-0);
+  --bg-element:      var(--neutral-0);
+  --bg-element-alt:  var(--neutral-100);
+  
+  /* Text */
+  --text-primary:    var(--neutral-900);
+  --text-secondary:  var(--neutral-500);
+  --text-tertiary:   var(--neutral-400);
+  --text-on-accent:  var(--neutral-0);
+
+  /* Borders */
+  --border-subtle:   var(--neutral-200);
+  --border-strong:   var(--neutral-300);
+  --border-focus:    var(--brand-500);
+
+  /* Interaction (Monochrome Primary) */
+  --action-primary:        var(--neutral-950); /* Ultra-dark/Black */
+  --action-primary-hover:  var(--neutral-800);
+  --action-secondary:      var(--neutral-0);
+  --action-secondary-hover:var(--neutral-50);
+
+  /* Shadows (Flat Mode = None, but variables kept for logic) */
+  --shadow-sm: none;
+  --shadow-md: none;
+}
+
+/* ========================================
+   DARK MODE OVERRIDES
+   ======================================== */
+.dark {
+  /* Backgrounds */
+  --bg-app:          var(--neutral-950);
+  --bg-panel:        var(--neutral-900);
+  --bg-element:      var(--neutral-900);
+  --bg-element-alt:  var(--neutral-800);
+
+  /* Text */
+  --text-primary:    var(--neutral-50);
+  --text-secondary:  var(--neutral-400);
+  --text-tertiary:   var(--neutral-500);
+
+  /* Borders */
+  --border-subtle:   var(--neutral-800);
+  --border-strong:   var(--neutral-700);
+  
+  /* Interaction (Monochrome Inverse) */
+  --action-primary:        var(--neutral-50); /* White */
+  --action-primary-hover:  var(--neutral-200);
+  --action-secondary:      var(--neutral-800);
+  --action-secondary-hover:var(--neutral-700);
+  
+  /* Status Adjustment */
+  --error-light: var(--error-dark);
+  --success-light: var(--success-dark);
+}
+
+/* ========================================
+   GLOBAL RESET
+   ======================================== */
+* {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+  transition: background-color 0.2s ease, color 0.1s ease, border-color 0.2s ease;
+}
+
+body, .gradio-container {
+  background-color: var(--bg-app) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ========================================
+   COMPONENT OVERRIDES
+   ======================================== */
+
+/* 1. Header & Typography */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-primary) !important;
+}
+
+#header {
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+}
+
 #header h1 {
-    font-weight: 600; font-size: 2.5rem; margin-bottom: 0.25rem;
-    background: linear-gradient(135deg, #2563EB, #7C3AED);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  font-weight: 700;
+  letter-spacing: -0.025em;
 }
-#header p { font-size: 1rem; opacity: 0.6; }
-.primary-btn {
-    background: linear-gradient(135deg, #2563EB, #1D4ED8) !important;
-    border: none !important; color: white !important; font-weight: 600 !important;
-    padding: 12px 24px !important; transition: all 0.2s ease;
+
+/* 2. Panels & Cards (Inputs, Groups) */
+.gradio-group, .gradio-box, .status-card, .upload-section, .quick-settings, .input-card, .output-markdown, .gradio-textbox textarea {
+  background: var(--bg-panel) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
 }
-.primary-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(37, 99, 235, 0.4); }
-.copy-btn { background: #10B981 !important; color: white !important; }
-.theme-btn { background: #6B7280 !important; color: white !important; }
-.input-card {
-    border: 1px solid var(--border-color-primary); border-radius: 16px !important;
-    padding: 1.5rem !important; background: var(--background-fill-secondary);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05); transition: all 0.3s ease;
+
+/* 3. Inputs (Text, Number, Dropdown) */
+input[type="text"], input[type="password"], input[type="number"], textarea, select {
+  background-color: var(--bg-element) !important;
+  border: 1px solid var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+  border-radius: 6px !important;
 }
-.input-card:has(input[type="file"]:hover) {
-    border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); transform: translateY(-2px);
+
+input:focus, textarea:focus, select:focus {
+  border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 1px var(--border-focus) !important;
 }
-.output-markdown { 
-    padding: 1.5rem; border-radius: 12px; background: var(--background-fill-primary);
-    border: 1px solid var(--border-color-primary); min-height: 350px;
+
+/* 4. Buttons */
+button {
+  box-shadow: none !important;
+  font-weight: 500 !important;
+  border-radius: 6px !important;
+  text-transform: none !important;
 }
-.stats-box {
-    padding: 0.75rem 1rem; background: linear-gradient(135deg, #F0F9FF, #E0F2FE);
-    border-radius: 8px; border: 1px solid #BAE6FD; font-size: 0.9rem; margin-bottom: 1rem;
+
+/* Primary Button */
+button.primary, .primary-btn {
+  background: var(--action-primary) !important;
+  color: var(--bg-app) !important; /* Invert text relative to button bg */
+  border: 1px solid transparent !important;
 }
-.metadata-box {
-    padding: 0.75rem 1rem; background: linear-gradient(135deg, #FEF3C7, #FDE68A);
-    border-radius: 8px; border: 1px solid #FCD34D; font-size: 0.85rem;
+
+button.primary:hover, .primary-btn:hover {
+  background: var(--action-primary-hover) !important;
 }
-.quality-box {
-    padding: 0.75rem 1rem; background: linear-gradient(135deg, #D1FAE5, #A7F3D0);
-    border-radius: 8px; border: 1px solid #6EE7B7; font-size: 0.9rem;
+
+/* Secondary Button */
+button.secondary, .secondary-btn {
+  background: var(--bg-element) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-subtle) !important;
 }
-.sidebar { background: var(--background-fill-secondary); border-radius: 12px; padding: 1rem; font-size: 0.85rem; }
-.bottom-accent {
-    height: 4px; width: 100%; background: linear-gradient(90deg, #2563EB, #7C3AED, #EC4899);
-    position: fixed; bottom: 0; left: 0; z-index: 1000;
+
+button.secondary:hover {
+  background: var(--bg-element-alt) !important;
+  border-color: var(--border-strong) !important;
 }
-footer { visibility: hidden; }
+
+/* 5. Tabs */
+.gradio-tabs {
+  border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.gradio-tab-nav {
+  border: none !important;
+  background: transparent !important;
+}
+
+.gradio-tab-nav button {
+  color: var(--text-secondary) !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.gradio-tab-nav button.selected {
+  color: var(--action-primary) !important;
+  border-bottom: 2px solid var(--action-primary) !important;
+  font-weight: 600 !important;
+}
+
+/* 6. Status & Stats Areas */
+#status-card {
+  background: var(--bg-panel) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: none !important;
+  padding: 1.5rem !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  gap: 1rem !important;
+}
+
+/* 7. Markdown/HTML Content */
+.output-markdown code {
+  background-color: var(--bg-element-alt) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+}
+
+.output-markdown pre {
+  background-color: var(--bg-element-alt) !important;
+  border: 1px solid var(--border-subtle);
+}
+
+.output-markdown table {
+  border-color: var(--border-subtle) !important;
+}
+
+.output-markdown th {
+  background-color: var(--bg-element-alt) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-subtle) !important;
+}
+
+.output-markdown td {
+  border-color: var(--border-subtle) !important;
+  color: var(--text-secondary) !important;
+}
+
+/* 8. Labels */
+span.svelte-1gfkn6j, label, .block-title {
+  color: var(--text-secondary) !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  margin-bottom: 0.5rem;
+}
+
+/* 9. Icons/SVGs */
+svg {
+  fill: currentColor;
+}
 """
+
 
 copy_js = """
 function copyToClipboard() {
@@ -601,134 +756,130 @@ function copyToClipboard() {
 """
 
 # Gradio Interface
-with gr.Blocks(title="DocFlow", js=copy_js) as demo:
-    
-    gr.HTML('<div class="bottom-accent"></div>')
+with gr.Blocks(title="DocFlow") as demo:
 
     with gr.Row(elem_classes="container"):
         
         with gr.Column(scale=5):
             
+            # Header
             with gr.Row():
-                with gr.Column(elem_id="header", scale=3):
+                with gr.Column(elem_id="header"):
                     gr.Markdown("# DocFlow")
                     gr.Markdown("RAG-Optimized PDF & Image to Markdown Conversion")
-                with gr.Column(scale=1):
-                    theme_btn = gr.Button("🌙 Dark Mode", elem_classes="theme-btn", size="sm")
             
-            # Settings
-            with gr.Accordion("⚙️ Settings", open=False):
-                # OCR Engine Selection
+            # Upload Section (TOP PRIORITY)
+            gr.Markdown("## Upload Documents")
+            with gr.Row(elem_classes="upload-section"):
+                file_input = gr.File(
+                    label="Upload PDF or Image Files",
+                    file_types=[".pdf", ".png", ".jpg", ".jpeg"],
+                    type="filepath", 
+                    file_count="multiple", 
+                    height=150
+                )
+            
+            with gr.Row():
+                process_btn = gr.Button("Convert to Markdown", variant="primary", size="lg", elem_classes="primary-btn")
+                clear_btn = gr.Button("Clear", variant="secondary", size="lg")
+            
+
+            
+            # Status Card (PERSISTENT - ALWAYS VISIBLE)
+            gr.Markdown("## Status")
+            with gr.Column(elem_id="status-card"):
+                with gr.Row():
+                    status_box = gr.Markdown("**Status:** Upload a file to get started")
+                    quality_display = gr.Markdown("**Quality:** N/A")
+                
+                with gr.Row():
+                    stats_display = gr.Markdown("**Stats:** N/A")
+                    metadata_display = gr.Markdown("**Metadata:** N/A")
+            
+            # Results Section
+            gr.Markdown("## Results")
+            with gr.Tabs():
+                with gr.TabItem("Preview"):
+                    output_md_view = gr.Markdown(elem_classes="output-markdown")
+                with gr.TabItem("Raw Code"):
+                    output_raw_text = gr.TextArea(label="Markdown Source", lines=18)
+                    copy_btn = gr.Button("Copy to Clipboard", elem_classes="copy-btn", size="sm")
+                with gr.TabItem("Extracted Images"):
+                    image_gallery = gr.Gallery(label="Images from PDF", columns=3, height=400, value=[])
+
+            download_btn = gr.File(label="Download", interactive=False)
+            
+            # Settings Footer
+            gr.Markdown("## Settings")
+            with gr.Group(elem_classes="quick-settings"):
                 with gr.Row():
                     ocr_engine = gr.Dropdown(
-                        choices=["OpenRouter (Cloud - Recommended ⭐)", "RapidOCR (Local - Layout Aware)"],
-                        value="OpenRouter (Cloud - Recommended ⭐)",
+                        choices=["Cloud OCR (OpenRouter)", "Local OCR (Auto-Detect Digital/Scan)"],
+                        value="Cloud OCR (OpenRouter)",
                         label="OCR Engine",
-                        info="OpenRouter supports 100+ languages including Myanmar. RapidOCR features local layout analysis."
+                        info="Cloud: 100+ languages. Local: Auto-detects digital PDFs vs scanned docs.",
+                        scale=2
                     )
-                
-                # OpenRouter Settings (conditional)
-                with gr.Group(visible=True) as openrouter_settings:
-                    gr.Markdown("### 🌐 OpenRouter Settings")
-                    with gr.Row():
-                        openrouter_model = gr.Dropdown(
-                            choices=[
-                                "Nemotron Nano 12B VL (FREE) ⭐",
-                                "Gemini 2.0 Flash Lite ($0.08/1K pages)",
-                                "Qwen 2.5-VL 32B ($0.05/1K pages)",
-                                "Qwen 2.5-VL 72B ($0.15/1K pages)",
-                                "Mistral Pixtral Large ($2/1K pages)"
-                            ],
-                            value="Nemotron Nano 12B VL (FREE) ⭐",
-                            label="Model",
-                            info="FREE model recommended for most use cases"
-                        )
-                    with gr.Row():
-                        openrouter_api_key = gr.Textbox(
-                            label="OpenRouter API Key",
-                            type="password",
-                            placeholder="sk-or-v1-...",
-                            info="Get free key at https://openrouter.ai"
-                        )
-                    cost_estimate = gr.Markdown("💰 **Estimated Cost:** FREE", elem_classes="cost-display")
-                
-                # RapidOCR Settings (conditional)
-                with gr.Group(visible=False) as rapidocr_settings:
-                    gr.Markdown("### 🔧 RapidOCR Settings")
-                    with gr.Row():
-                        dpi_slider = gr.Slider(minimum=150, maximum=600, value=300, step=50, label="DPI")
-                        ocr_lang = gr.Dropdown(
-                            choices=["en", "ch_sim", "ch_tra", "ja", "ko", "ru"],
-                            value="en",
-                            label="OCR Language",
-                            info="Limited to 6 languages"
-                        )
-                
-                # Common Settings
-                gr.Markdown("### 📤 Export Options")
-                with gr.Row():
                     export_format = gr.Dropdown(
                         choices=["Markdown (.md)", "HTML (.html)", "Plain Text (.txt)", "Word Document (.docx)"],
-                        value="Markdown (.md)", label="Export Format"
-                    )
-                    use_cache = gr.Checkbox(value=True, label="Use Cache")
-                with gr.Row():
-                    page_start = gr.Number(label="Start Page", precision=0)
-                    page_end = gr.Number(label="End Page", precision=0)
-
-            
-            # Info boxes
-            with gr.Row():
-                with gr.Column(scale=1):
-                    metadata_display = gr.Markdown("", elem_classes="metadata-box", visible=False)
-                with gr.Column(scale=1):
-                    quality_display = gr.Markdown("", elem_classes="quality-box", visible=False)
-            
-            with gr.Row(elem_classes="input-card"):
-                with gr.Column(scale=2):
-                    file_input = gr.File(
-                        label="📁 Upload Document(s)",
-                        file_types=[".pdf", ".png", ".jpg", ".jpeg"],
-                        type="filepath", file_count="multiple", height=120
+                        value="Markdown (.md)", 
+                        label="Export Format",
+                        scale=1
                     )
                 
-                with gr.Column(scale=1):
-                    process_btn = gr.Button("🚀 Convert", variant="primary", elem_classes="primary-btn")
-                    status_box = gr.Markdown("Upload PDF(s) or image(s) to get started.")
-            
-            stats_display = gr.Markdown("", elem_classes="stats-box", visible=False)
-            
-            gr.Markdown("### Result")
-            
-            with gr.Tabs():
-                with gr.TabItem("📄 Preview"):
-                    output_md_view = gr.Markdown(elem_classes="output-markdown")
-                with gr.TabItem("📝 Raw Code"):
-                    output_raw_text = gr.TextArea(label="Markdown Source", lines=18)
-                    copy_btn = gr.Button("📋 Copy to Clipboard", elem_classes="copy-btn", size="sm")
-                with gr.TabItem("🖼️ Extracted Images"):
-                    image_gallery = gr.Gallery(label="Images from PDF", columns=3, height=400)
-
-            download_btn = gr.File(label="📥 Download", interactive=False)
-        
-        # Sidebar
-        with gr.Column(scale=2):
-            # PDF Preview
-            pdf_preview = gr.Image(label="📄 PDF Preview", type="filepath", interactive=False)
-            
-            gr.Markdown("---")
-            
-            history_display = gr.Markdown(get_history_display())
-            refresh_btn = gr.Button("🔄 Refresh History", size="sm")
-            
-            gr.Markdown("---")
-            
-            stats_panel = gr.Markdown(get_stats_display())
-            
-            gr.Markdown("---")
-            
-            clear_cache_btn = gr.Button("🗑️ Clear Cache", size="sm")
-            cache_status = gr.Markdown("")
+                # Advanced Settings
+                with gr.Accordion("Advanced Options", open=False):
+                    
+                    # OpenRouter Settings (conditional)
+                    with gr.Group(visible=True) as openrouter_settings:
+                        gr.Markdown("### OpenRouter Settings")
+                        with gr.Row():
+                            openrouter_model = gr.Dropdown(
+                                choices=[
+                                    "Nemotron Nano 12B VL (FREE)",
+                                    "Gemini 2.0 Flash Lite ($0.08/1K pages)",
+                                    "Qwen 2.5-VL 32B ($0.05/1K pages)",
+                                    "Qwen 2.5-VL 72B ($0.15/1K pages)",
+                                    "Mistral Pixtral Large ($2/1K pages)"
+                                ],
+                                value="Gemini 2.0 Flash Lite ($0.08/1K pages)",
+                                label="Model",
+                                info="FREE model recommended for most use cases"
+                            )
+                        with gr.Row():
+                            openrouter_api_key = gr.Textbox(
+                                label="OpenRouter API Key",
+                                type="password",
+                                placeholder="sk-or-v1-...",
+                                info="Get free key at https://openrouter.ai",
+                                value=os.getenv("OPENROUTER_API_KEY", "")
+                            )
+                        cost_estimate = gr.Markdown("**Estimated Cost:** FREE", elem_classes="cost-display")
+                    
+                    # RapidOCR Settings (conditional)
+                    with gr.Group(visible=False) as rapidocr_settings:
+                        gr.Markdown("### Local OCR Settings")
+                        gr.Markdown("*Digital PDFs use pymupdf4llm automatically. These settings apply to scanned documents.*")
+                        with gr.Row():
+                            dpi_slider = gr.Slider(minimum=150, maximum=600, value=300, step=50, label="DPI")
+                            ocr_lang = gr.Dropdown(
+                                choices=["en", "ch_sim", "ch_tra", "ja", "ko", "ru"],
+                                value="en",
+                                label="OCR Language",
+                                info="For scanned documents (6 languages supported)"
+                            )
+                    
+                    # Common Advanced Options
+                    gr.Markdown("### Processing Options")
+                    with gr.Row():
+                        use_cache = gr.Checkbox(value=True, label="Use Cache")
+                        page_start = gr.Number(label="Start Page", precision=0, minimum=1)
+                        page_end = gr.Number(label="End Page", precision=0, minimum=1)
+                    
+                    # Theme Toggle
+                    gr.Markdown("### Appearance")
+                    with gr.Row():
+                        theme_btn = gr.Button("Toggle Dark/Light Mode", elem_classes="theme-btn")
 
     # Events
     # Settings toggle
@@ -750,19 +901,17 @@ with gr.Blocks(title="DocFlow", js=copy_js) as demo:
         inputs=[file_input, export_format, dpi_slider, ocr_lang, page_start, page_end, use_cache, 
                 ocr_engine, openrouter_model, openrouter_api_key],
         outputs=[output_md_view, output_raw_text, download_btn, status_box, stats_display, stats_display, 
-                 metadata_display, pdf_preview, image_gallery, quality_display]
-    ).then(
-        fn=get_history_display, outputs=[history_display]
-    ).then(
-        fn=get_stats_display, outputs=[stats_panel]
-    ).then(
-        fn=lambda m: gr.update(visible=bool(m)), inputs=[metadata_display], outputs=[metadata_display]
-    ).then(
-        fn=lambda q: gr.update(visible=bool(q)), inputs=[quality_display], outputs=[quality_display]
+                 metadata_display, image_gallery, quality_display]
     )
     
-    refresh_btn.click(fn=get_history_display, outputs=[history_display])
-    clear_cache_btn.click(fn=clear_cache, outputs=[cache_status])
+    # Clear button
+    clear_btn.click(
+        fn=clear_all,
+        inputs=[],
+        outputs=[file_input, output_md_view, output_raw_text, download_btn, status_box, 
+                 stats_display, quality_display, metadata_display, image_gallery]
+    )
+    
     copy_btn.click(fn=None, js="copyToClipboard")
     theme_btn.click(fn=None, js="() => { document.body.classList.toggle('dark'); return []; }")
 
@@ -776,6 +925,7 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0", 
         server_port=7860,
-        theme=gr.themes.Soft(primary_hue="blue", spacing_size="sm", radius_size="lg"),
-        css=custom_css
+        theme=gr.themes.Base(primary_hue="blue", neutral_hue="slate", spacing_size="sm", radius_size="sm"),
+        css=custom_css,
+        js=copy_js
     )

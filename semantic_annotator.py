@@ -141,6 +141,10 @@ class SemanticAnnotator:
         """Annotate text element with semantic role."""
         content = element.get('content', '').strip()
         confidence = element.get('confidence', 1.0)
+        try:
+            confidence = float(confidence) if isinstance(confidence, str) else confidence
+        except (ValueError, TypeError):
+            confidence = 1.0
         reading_order = element.get('reading_order')
         
         if not content:

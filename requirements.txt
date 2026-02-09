@@ -4,7 +4,6 @@ gradio
 rapidocr_onnxruntime
 markdown2
 python-docx
-gmft
 pillow
 opencv-python
 pandas

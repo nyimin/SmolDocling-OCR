@@ -172,17 +172,17 @@ class LayoutAnalyzer:
         text_height = bbox[3] - bbox[1] if len(bbox) >= 4 else 0
         text_width = bbox[2] - bbox[0] if len(bbox) >= 4 else 0
         
+        # Calculate average text height for the page
+        avg_height = np.mean([e['bbox'][3] - e['bbox'][1] 
+                             for e in page_elements 
+                             if 'bbox' in e and len(e['bbox']) >= 4]) if page_elements else 12.0
+        
         # Heading detection heuristics
         # 1. Short text (< 100 chars)
         # 2. Larger font size (height > average * 1.2)
         # 3. Often at top of page or after large vertical gap
         
         if len(text) < 100:
-            # Calculate average text height
-            avg_height = np.mean([e['bbox'][3] - e['bbox'][1] 
-                                 for e in page_elements 
-                                 if 'bbox' in e and len(e['bbox']) >= 4])
-            
             if text_height > avg_height * 1.2:
                 return 'heading'
         
@@ -233,6 +233,11 @@ class LayoutAnalyzer:
         
         for elem in elements:
             confidence = elem.get('confidence', 1.0)
+            # Convert to float if it's a string (RapidOCR sometimes returns string)
+            try:
+                confidence = float(confidence) if isinstance(confidence, str) else confidence
+            except (ValueError, TypeError):
+                confidence = 1.0  # Default to high confidence if conversion fails
             
             if confidence >= threshold:
                 high_conf.append(elem)

@@ -2,11 +2,11 @@
 
 A powerful, optimized application that intelligently converts PDFs and images to clean, structured Markdown. It features a **Hybrid Pipeline** that automatically selects the best tool for the job:
 
-- **🌐 Cloud OCR (OpenRouter)**: **(NEW)** High-quality OCR using vision models. Recommended for difficult documents and 100+ languages including **Myanmar** 🇲🇲.
-- **⚡ Fast Mode (MarkItDown)**: Used for digital PDFs. Directly extracts text and tables.
-- **📊 Table Mode (gmft)**: Specialized mode for complex table extraction.
-- **🐢 Scan Mode (RapidOCR)**: Fast local OCR fallback for 6 languages (en, ch_sim, ch_tra, ja, ko, ru).
-- **✨ Smart Cleaning**: **(NEW)** "Tag-Don't-Remove" strategy: Tags noise (headers, footers, watermarks) with semantic roles instead of deleting them, ensuring 100% content preservation for high-fidelity RAG.
+- **🌐 Cloud OCR (OpenRouter)**: High-quality OCR using vision models. Recommended for difficult documents and 100+ languages including **Myanmar** 🇲🇲.
+- **🤖 Local OCR (Auto-Detect)**: **(NEW v2.1)** Automatically detects digital vs scanned PDFs:
+  - **Digital PDFs**: Uses `pymupdf4llm` for LLM-optimized extraction with superior table handling
+  - **Scanned PDFs**: Falls back to RapidOCR with layout-aware processing
+- **✨ Smart Cleaning**: "Tag-Don't-Remove" strategy: Tags noise (headers, footers, watermarks) with semantic roles instead of deleting them, ensuring 100% content preservation for high-fidelity RAG.
 
 ---
 
@@ -81,11 +81,11 @@ python app.py
 
 ## ⚙️ OCR Engines
 
-| Engine            | Best For                              | Languages      | Privacy    | Cost                        |
-| :---------------- | :------------------------------------ | :------------- | :--------- | :-------------------------- |
-| **OpenRouter** ⭐ | Scanned PDFs, Images, Complex Layouts | 100+ (inc. 🇲🇲) | Cloud API  | **FREE** (Nemotron) or Paid |
-| **RapidOCR**      | Simple Scans, Offline Use             | 6 Languages    | 100% Local | FREE                        |
-| **MarkItDown**    | Digital PDFs (Copy-pasteable text)    | All            | 100% Local | FREE                        |
+| Engine             | Best For                              | Languages      | Privacy    | Cost                        |
+| :----------------- | :------------------------------------ | :------------- | :--------- | :-------------------------- |
+| **OpenRouter** ⭐  | Scanned PDFs, Images, Complex Layouts | 100+ (inc. 🇲🇲) | Cloud API  | **FREE** (Nemotron) or Paid |
+| **pymupdf4llm** 🆕 | Digital PDFs (LLM/RAG optimized)      | All            | 100% Local | FREE                        |
+| **RapidOCR**       | Scanned Documents, Offline Use        | 6 Languages    | 100% Local | FREE                        |
 
 ### Recommended Cloud Models (via OpenRouter)
 

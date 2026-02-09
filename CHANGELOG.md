@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v2.1.0] - 2026-02-09
+
+### 🚀 pymupdf4llm Migration
+
+- **Simplified Architecture**: Replaced GMFT with `pymupdf4llm` for digital PDF extraction, reducing code complexity from ~140 lines to ~40 lines while improving quality.
+- **LLM-Optimized Extraction**: Digital PDFs now use `pymupdf4llm` which is specifically optimized for LLM/RAG workflows with superior table handling and document structure preservation.
+- **Auto-Detection**: The "Local OCR" mode now automatically detects digital vs scanned PDFs:
+  - **Digital PDFs**: Uses `pymupdf4llm` for fast, high-quality extraction
+  - **Scanned PDFs**: Falls back to RapidOCR with layout-aware processing
+
+### ✨ UI Improvements
+
+- **Clearer Labels**: Updated OCR engine dropdown to "Cloud OCR (OpenRouter)" and "Local OCR (Auto-Detect Digital/Scan)" to better communicate the workflow.
+- **Informative Settings**: Added explanatory text in the Local OCR settings section clarifying that digital PDFs use pymupdf4llm automatically.
+- **Progress Display Fix**: Fixed the nested progress callback issue that caused progress indicators to appear in multiple windows simultaneously.
+
+### 🔧 Technical Changes
+
+- **Dependencies**: Removed `gmft` dependency, reducing installation size and complexity.
+- **Function Signatures**: Updated `toggle_settings()` to match new dropdown labels.
+- **Progress Handling**: Simplified progress callback passing to prevent UI clutter.
+
+---
+
 ## [v2.0.0] - 2026-02-09
 
 ### 🚀 High-Fidelity Pipeline (Phase 1-4)

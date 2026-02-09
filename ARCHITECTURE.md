@@ -15,9 +15,8 @@ DocFlow is a multi-modal document extraction system designed to handle both digi
     - **RapidOCR Validator (`rapidocr_validator.py`)**: Assesses local OCR quality, layout accuracy, and completeness.
 6.  **Extraction Engines**:
     - **OpenRouter (Cloud)**: Uses Vision LLMs for high-accuracy OCR with RAG-optimized specialized prompts.
-    - **RapidOCR (Local)**: High-speed local OCR engine with layout-aware post-processing.
-    - **MarkItDown / PyMuPDF**: Direct text extraction for digital PDFs.
-    - **GMFT**: Specialized table extraction and layout analysis.
+    - **pymupdf4llm (Local)**: **(NEW v2.1)** LLM-optimized Markdown extraction for digital PDFs with superior table handling and document structure preservation.
+    - **RapidOCR (Local)**: High-speed local OCR engine with layout-aware post-processing for scanned documents.
 
 ---
 

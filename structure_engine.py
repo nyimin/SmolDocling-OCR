@@ -1,5 +1,6 @@
 import os
 import traceback
+import time
 from PIL import Image
 import fitz # PyMuPDF
 import cleaner # New cleaner module
@@ -63,160 +64,51 @@ if RapidOCR:
 
 # ... (skip lines) ...
 
-def extract_with_gmft(pdf_path):
+def extract_with_pymupdf4llm(pdf_path):
     """
-    Use GMFT to extract tables from digital PDFs.
-    Returns: Markdown string of tables + text references.
+    Use pymupdf4llm to extract digital PDFs to LLM-optimized Markdown.
+    Returns: Markdown string, metadata dict
     """
-    if not detector:
-        return "Error: GMFT not initialized."
-        
-    output_md = ""
+    import pymupdf4llm
     
-    # Config for stricter row detection
-    custom_config = TATRFormatConfig(
-        formatter_base_threshold=0.7, # Default 0.3. Strictness to avoid extra rows.
-        remove_null_rows=True
-    )
-
     try:
-        # Open with GMFT for tables
-        gmft_doc = PyPDFium2Document(pdf_path)
+        # Extract with pymupdf4llm (optimized for LLMs)
+        md_text = pymupdf4llm.to_markdown(pdf_path)
         
-        # Open with PyMuPDF for text extraction (better coordinates)
-        fitz_doc = fitz.open(pdf_path)
+        # Get page count for metadata
+        doc = fitz.open(pdf_path)
+        page_count = len(doc)
+        doc.close()
         
-        all_pages_elements = []
-
-        for i, (gmft_page, fitz_page) in enumerate(zip(gmft_doc, fitz_doc)):
-            page_elements = []
-            
-            # A. Extract Tables
-            tables = []
-            try:
-                tables = detector.extract(gmft_page)
-            except Exception as e:
-                print(f"GMFT Table Extraction failed page {i}: {e}")
-
-            # Collect table bboxes for exclusion
-            table_bboxes = [] # (x0, y0, x1, y1)
-            
-            if tables:
-                for table in tables:
-                     # table.rect.bbox is (x0, y0, x1, y1) in 72 DPI (usually)
-                     # PyMuPDF default is also 72 DPI (points)
-                     table_bboxes.append(table.rect.bbox)
-                     
-                     # Add table to elements
-                     try:
-                        ft = formatter.extract(table, config_overrides=custom_config)
-                        df = ft.df()
-                        md_table = df.to_markdown()
-                        if md_table:
-                             page_elements.append({
-                                "y": table.rect.bbox[1],
-                                "type": "table",
-                                "content": md_table
-                            })
-                     except Exception as e:
-                         pass
-
-            # Helper: Check if box is inside any table
-            def is_in_table(box):
-                bx0, by0, bx1, by1 = box
-                b_center_x, b_center_y = (bx0+bx1)/2, (by0+by1)/2
-                for (tx0, ty0, tx1, ty1) in table_bboxes:
-                    # Simple overlap check
-                    if tx0 <= b_center_x <= tx1 and ty0 <= b_center_y <= ty1:
-                        return True
-                return False
-
-            # B. Extract Text (Blocks)
-            # blocks: (x0, y0, x1, y1, "text", block_no, block_type)
-            blocks = fitz_page.get_text("blocks")
-            
-            for b in blocks:
-                x0, y0, x1, y1, text, block_no, block_type = b
-                if block_type != 0: # 0 = text
-                    continue
-                    
-                if not is_in_table((x0, y0, x1, y1)):
-                     page_elements.append({
-                        "y": y0,
-                        "type": "text",
-                        "content": text.strip()
-                    })
-
-            # Sort elements
-            page_elements.sort(key=lambda x: x["y"])
-            all_pages_elements.append(page_elements)
-
-        gmft_doc.close()
-        fitz_doc.close()
-
-        # --- CLEANING ---
-        cleaned_pages = cleaner.detect_and_remove_headers_footers(all_pages_elements)
+        # Extract document metadata
+        doc_metadata = metadata_extractor.extract_metadata(pdf_path)
         
-        # --- RENDER ---
-        for i, page_elems in enumerate(cleaned_pages):
-            output_md += f"\n## Page {i + 1}\n\n"
-            page_text_accumulator = ""
-            
-            for elem in page_elems:
-                if elem["type"] == "text":
-                    page_text_accumulator += elem["content"] + "\n"
-                elif elem["type"] == "table":
-                     if page_text_accumulator:
-                         fixed_text = cleaner.merge_hyphenated_words(page_text_accumulator)
-                         output_md += fixed_text + "\n"
-                         page_text_accumulator = ""
-                     output_md += "\n" + elem["content"] + "\n\n"
-            
-            if page_text_accumulator:
-                 fixed_text = cleaner.merge_hyphenated_words(page_text_accumulator)
-                 output_md += fixed_text + "\n"
-                 
+        # Add YAML frontmatter
+        extraction_method = "pymupdf4llm (Digital PDF - LLM Optimized)"
+        markdown_with_frontmatter = metadata_extractor.add_yaml_frontmatter(
+            md_text,
+            doc_metadata,
+            extraction_method=extraction_method,
+            confidence_score=None,
+            language="en",
+            ocr_engine="pymupdf4llm"
+        )
+        
+        metadata = {
+            "extraction_method": "Digital (pymupdf4llm)",
+            "pages": page_count,
+            "optimized_for": "LLM/RAG",
+            "features": "Superior table extraction, document structure preservation"
+        }
+        
+        return markdown_with_frontmatter, metadata
+        
     except Exception as e:
-         output_md += f"\nError during GMFT extraction: {e}\n"
-         traceback.print_exc()
-        
-    # --- VALIDATION & METADATA ---
-    # Validate RapidOCR output for quality
-    page_count = len(images)
-    validation_report = rapidocr_validator.validate_rapidocr_output(
-        output_md,
-        page_count=page_count,
-        original_method="RapidOCR"
-    )
-    
-    # Extract document metadata
-    doc_metadata = metadata_extractor.extract_metadata(input_path)
-    
-    # Add YAML frontmatter with quality scores
-    extraction_method = f"RapidOCR (DPI: {dpi}, Lang: {lang})"
-    markdown_with_frontmatter = metadata_extractor.add_yaml_frontmatter(
-        output_md,
-        doc_metadata,
-        extraction_method=extraction_method,
-        confidence_score=validation_report['quality_score'],
-        language=lang
-    )
-    
-    # Prepare metadata dictionary
-    metadata = {
-        "extraction_method": extraction_method,
-        "dpi": dpi,
-        "language": lang,
-        "pages_processed": page_count,
-        "quality_score": validation_report['quality_score'],
-        "detected_columns": validation_report['layout_analysis']['detected_columns'],
-        "role_annotations": validation_report['semantic_annotations']['role_count'],
-        "uncertain_percentage": validation_report['confidence_analysis']['uncertain_percentage'],
-        "completeness_score": validation_report['completeness']['completeness_score'],
-        "validation_issues": len(validation_report['issues'])
-    }
-    
-    return markdown_with_frontmatter, metadata
+        print(f"pymupdf4llm extraction failed: {e}")
+        traceback.print_exc()
+        return None, {"error": str(e)}
+
+
 
 # ... (previous imports)
 from gmft.pdf_bindings.base import BasePage
@@ -274,12 +166,23 @@ def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
         lang: Language code for OCR
         enhanced_mode: Use v2.0 quality enhancement pipeline (default: True)
     
-    Returns: Markdown string.
+    Returns:
+        tuple: (markdown_text, metadata_dict)
     """
     if not ocr_engine:
-        return "Error: RapidOCR not initialized."
+        return "Error: RapidOCR not initialized.", {}
         
     output_md = ""
+    
+    # Metadata dictionary to populate
+    metadata = {
+        "extraction_method": f"RapidOCR (lang={lang})",
+        "dpi": dpi,
+        "language": lang,
+        "pages_processed": 0,
+        "quality_score": 0.0,
+        "validation_issues": 0
+    }
     
     # Handle PDF input by converting to images first
     images = []
@@ -302,7 +205,7 @@ def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
         try:
             images = [Image.open(input_path).convert("RGB")]
         except Exception as e:
-            return f"Error reading image file: {e}"
+            return f"Error reading image file: {e}", {}
 
     # Collect all pages' elements first for global analysis (header/footer detection)
     all_pages_elements = []  # List of lists of elements
@@ -442,11 +345,15 @@ def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
             )
             
             # Log quality info
-            quality_score = report.get('quality', {}).get('score', 'N/A')
+            quality_score = report.get('quality', {}).get('score', '0.0')
             gate_passed = report.get('passed', True)
             print(f"Enhanced Pipeline: quality={quality_score}, gate_passed={gate_passed}")
             
-            return markdown
+            # Update metadata
+            metadata['quality_score'] = quality_score
+            metadata['pages_processed'] = len(cleaned_pages)
+            
+            return markdown, metadata
             
         except Exception as e:
             print(f"Enhanced pipeline failed, falling back: {e}")
@@ -467,6 +374,10 @@ def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
             reading_order = elem.get("reading_order", 0)
             uncertain = elem.get("uncertain", False)
             confidence = elem.get("confidence", 1.0)
+            try:
+                confidence = float(confidence) if isinstance(confidence, str) else confidence
+            except (ValueError, TypeError):
+                confidence = 1.0
             
             if elem_type == "text":
                 # Add semantic role annotation
@@ -519,7 +430,10 @@ def extract_with_rapidocr(input_path, dpi=300, lang="en", enhanced_mode=True):
         language=lang
     )
 
-    return output_md_with_frontmatter
+    # Update metadata for legacy path
+    metadata['pages_processed'] = len(cleaned_pages)
+
+    return output_md_with_frontmatter, metadata
 
 
 # ============================================================================
@@ -716,17 +630,40 @@ Extract the document content following all rules above. Start with <!-- page:1 -
                 }
             })
         
-        # Call OpenRouter API
-        response = client.chat.completions.create(
-            model=model_id,
-            messages=[
-                {
-                    "role": "user",
-                    "content": content
-                }
-            ],
-            max_tokens=16000  # Generous limit for long documents
-        )
+        # Call OpenRouter API with retry logic and timeout
+        max_retries = 5  # More retries for intermittent connection issues
+        retry_delay = 3  # Initial delay in seconds
+        last_exception = None
+        
+        for attempt in range(max_retries):
+            try:
+                response = client.chat.completions.create(
+                    model=model_id,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": content
+                        }
+                    ],
+                    max_tokens=16000,  # Generous limit for long documents
+                    timeout=120.0  # 120-second timeout for slow/unstable connections
+                )
+                break  # Success - exit retry loop
+                
+            except Exception as e:
+                last_exception = e
+                error_type = type(e).__name__
+                
+                # Check if we should retry
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 2s, 4s, 8s
+                    wait_time = retry_delay * (2 ** attempt)
+                    print(f"OpenRouter API attempt {attempt + 1} failed ({error_type}). Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    # Final attempt failed - raise the exception
+                    print(f"OpenRouter API failed after {max_retries} attempts. Last error: {error_type}")
+                    raise Exception(f"OpenRouter API failed after {max_retries} attempts: {str(e)}") from e
         
         # Extract markdown text
         markdown_text = response.choices[0].message.content
@@ -789,3 +726,59 @@ Extract the document content following all rules above. Start with <!-- page:1 -
         print(error_msg)
         traceback.print_exc()
         return error_msg, {"error": str(e)}
+
+def extract_smart_local(input_path, dpi=300, lang="en", enhanced_mode=True, progress_callback=None):
+    """
+    Smart local extraction with automatic digital/scan detection.
+    - Digital PDFs: Use pymupdf4llm (fast, LLM-optimized)
+    - Scanned PDFs: Use RapidOCR (layout-aware OCR)
+    
+    Returns:
+        tuple: (markdown_text, metadata_dict)
+    """
+    metadata = {
+        "extraction_method": "Smart Local (Auto)",
+        "dpi": dpi,
+        "language": lang,
+        "quality_score": 0.0,
+        "pages_processed": 0
+    }
+    
+    if progress_callback:
+        progress_callback(0.1, "🧠 Smart Mode: Analyzing document...")
+    
+    # 1. Try Digital Extraction (if PDF)
+    if str(input_path).lower().endswith(".pdf"):
+        try:
+            if progress_callback:
+                progress_callback(0.3, "🔍 Detecting document type...")
+                
+            print(f"Smart Local: Attempting digital extraction for {input_path}...")
+            # Call pymupdf4llm extraction
+            md_text, digital_meta = extract_with_pymupdf4llm(input_path)
+            
+            # Heuristic: Check if we got meaningful text length
+            if md_text and len(md_text.strip()) > 100:
+                print("Smart Local: Digital extraction successful.")
+                if progress_callback:
+                    progress_callback(1.0, "✅ Digital extraction complete")
+                
+                # Merge metadata
+                metadata.update(digital_meta)
+                return md_text, metadata
+            else:
+                print("Smart Local: Digital extraction returned insufficient text. Falling back to OCR.")
+                if progress_callback:
+                    progress_callback(0.4, "📄 Scanned document detected, running OCR...")
+        except Exception as e:
+            print(f"Smart Local: Digital extraction failed: {e}")
+            if progress_callback:
+                progress_callback(0.4, "⚠️ Digital extraction failed, falling back to OCR...")
+            
+    # 2. Fallback to RapidOCR
+    print(f"Smart Local: Running RapidOCR...")
+    if progress_callback:
+        progress_callback(0.5, "📷 Starting RapidOCR scan...")
+        
+    return extract_with_rapidocr(input_path, dpi, lang, enhanced_mode)
+

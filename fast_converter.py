@@ -72,7 +72,8 @@ def convert_fast(file_path):
                             block_content += "# "
                         else:
                             block_content += "## "
-                except:
+                except (IndexError, KeyError):
+                    # Block has no spans or lines - skip header detection
                     pass
 
                 for l in b["lines"]:
